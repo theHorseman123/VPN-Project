@@ -34,16 +34,15 @@ class Server:
                     
                     data = read_sock.recv(1024)
                     if data:
-                        msg = self.handle(data.decode('utf-8'), read_sock)
-                        # if the tracker has a reply 
-                        if msg:
-                            messages_to_send.append((read_sock, msg.encode('utf-8')))
+                        print(f"Proxy: <{data.decode('utf-8')}>")
+                        read_sock.send(data)
                     else:
                         print(f"Closing connection with: {read_sock.getpeername()}")
                         rlist.remove(read_sock)
                         read_sock.close()
                 
-                except:
+                except Exception as error:
+                    print(error)
                     print(f"Closing connection with: {read_sock.getpeername()}")
                     rlist.remove(read_sock)
                     read_sock.close()
@@ -51,7 +50,7 @@ class Server:
             messages_to_send = self.send_waiting_messages(write_socks, messages_to_send)
     
     @staticmethod
-    def handle(data, socket) -> None:
+    def handle(data) -> str:
         print(f"Proxy: <{data}>")
         return data
 
