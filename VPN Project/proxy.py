@@ -27,10 +27,10 @@ class Proxy:
         messages_to_send = []
 
         print("Starting proxy on:", (self.host, self.port))
-        
+
         while 1:
             # get readable and writeable socket 
-            read_socks, write_socks, _ = select(rlist+[self.proxy], rlist, [])
+            read_socks, write_socks, _ = select([self.proxy]+rlist, rlist, [])
             for read_sock in read_socks:
                 try:
                     # if a new client tries to connect
@@ -41,23 +41,24 @@ class Proxy:
                         continue
                     data = read_sock.recv(1024)
                     if data:
-                        print(f"Server: <{data.decode('utf-8')}>")
-                        if read_sock is server:
+                        if read_sock == server:
+                            print(f"Server: <{data.decode('utf-8')}>")
                             # for now the proxy will broadcast the server's messages because there is only one server
                             for client in rlist:
-                                if client is not server:
-                                    messages_to_send.append((client, data))
+                                if not client == server:
+                                   client.send(data)
                         else:
-                            msg = self.handle(data.decode('utf-8'), read_sock)
-                            # if the tracker has a reply 
-                            if msg:
-                                messages_to_send.append((read_sock, msg.encode('utf-8')))
+                            # forward message to server
+                            print(f"Client: <{data.decode('utf-8')}>")
+                            server.send(data)
                     else:
+                        print(1)
                         print(f"Closing connection with client")
                         rlist.remove(read_sock)
                         read_sock.close()
                     
-                except:
+                except Exception as error:
+                    print(error)
                     print(f"Closing connection with client")
                     rlist.remove(read_sock)
                     read_sock.close()
