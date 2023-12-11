@@ -2,11 +2,12 @@
 
 ## First Milestone: simple proxy connection
 
-For the first milestone I crated three diffrent file: proxy.py, server.py, client.py. that I will explain one by one.
+For the first milestone I crated three diffrent files: proxy.py, server.py, client.py. 
+That I will explain one by one.
 
 ### Let's start with the server: 
 
-The server is used to demonstrate an external server the client want to send a request to.
+The server is used to demonstrate an external server the client wants to send a request to.
 Once the server gets a message he will echo it back we'll know if he got the message.
 
 ### Next the proxy: 
