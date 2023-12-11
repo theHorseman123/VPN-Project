@@ -16,7 +16,6 @@ class Server:
         self.sock.listen(5)
 
         rlist = []
-        messages_to_send = []
 
         print("Starting server on:", (self.host, self.port))
         
@@ -46,30 +45,7 @@ class Server:
                     print(f"Closing connection with: {read_sock.getpeername()}")
                     rlist.remove(read_sock)
                     read_sock.close()
-
-            messages_to_send = self.send_waiting_messages(write_socks, messages_to_send)
     
-    @staticmethod
-    def handle(data) -> str:
-        print(f"Proxy: <{data}>")
-        return data
-
-    @staticmethod
-    def send_waiting_messages(wlist:list, messages_to_send:list)->list:
-        """
-        Sending messages waiting messages to socket they are ready
-        params: 
-        wlist - list of the writeable sockets
-        messages_to_send - lists that each cell contains destination socket and message encoded data
-        return:
-        a list of the messages that weren't sent yet 
-        """
-        for msg in messages_to_send:
-            sock, data = msg
-            if sock in wlist:
-                sock.send(data)
-                messages_to_send.remove(msg)
-        return  messages_to_send
     
 def main():
     # Create server object
