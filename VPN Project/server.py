@@ -101,7 +101,7 @@ class Server:
     
 def main():
     # Create server object
-    server = Server()
+    server = Server(host="10.100.102.93")
 
     # Start server
     server.start()
