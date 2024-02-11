@@ -1,6 +1,5 @@
 import socket as sock
 import scapy.all
-import re
 from select import select
 from _thread import start_new_thread
 
@@ -18,14 +17,15 @@ class Proxy:
         request_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
         
         try:
-            request_sock.connect((web_host, int(web_port)))
-            print("")
+            request_sock.connect((web_host.decode('utf-8'), int(web_port)))
+            print("connected succesfully to", (web_host, int(web_port)))
+
         except Exception as error:
             print("Couldn't Connect web server at:", (web_host, web_port))
             client_sock.send(str(error).encode("utf-8"))
             client_sock.close()
         
-        reply = "HTTP/1.0 200 Connection established\r\nProxy-agent: TheHorseMan_Tunnel\r\n\r\n"
+        reply = "HTTP/1.0 200 Connection established\r\nProxy-agent: HorseMan_Tunnel\r\n\r\n"
         client_sock.send(reply.encode())
 
         request_sock.setblocking(False)
@@ -47,31 +47,30 @@ class Proxy:
             except BlockingIOError as error:
                 pass
             except Exception as error:
-                break
-
-        request_sock.close()
-        client_sock.close()
-    """
+                break 
+    
     def http_request(self, client_sock, addr, request):
-        request = request.decode('utf-8')
-        request_lines = request.split("\r\n")
-        host_line = [i for i in request_lines if "Host:" in i][0]
-        web_host = host_line.split(":")
-        
-        if len(web_host) < 1:
-            print("something wrong with request")
+        # initializing socket to webserver
+        host_line = [data for data in request.split(b"\r\n") if b"Host:" in data][0]
+        print(host_line)
+
+        if len(host_line) < 1:
             client_sock.close()
             return
         
-        web_host = web_host[1].strip()
+        web_server_data = host_line.split(b":")[1:]
+        web_server, port = web_server_data[0].strip(), 80 if len(web_server_data) == 1 else web_server_data[1]
 
-        # search for a port match using regex
-        
-        web_port = 80
-        
         request_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+
+        try:
+            request_sock.connect((web_server.decode(), int(port)))
+        except Exception as error:
+            print("Failed to connect to:", (web_server.decode(), int(port)))
+            client_sock.close()
+            print(error)
+            return
         
-        # getting requested data from client and sending it to the server
         reply = request[:request.find(b" ") + 1] + request[request.find(b"/",request.find(b"//") + 2):]
         try:
             request_sock.sendall(reply)
@@ -83,7 +82,6 @@ class Proxy:
         data = b''
         data_fragment = b'1'
 
-        # getting data from webserver
         while data_fragment:
             try:
                 data_fragment = request_sock.recv(4096)
@@ -96,27 +94,26 @@ class Proxy:
                 client_sock.sendall(data)
             except:
                 client_sock.close()
-        
+                request_sock.close()
+
         request_sock.close()
         client_sock.close()
-        """
 
 
     def client_handler(self, client_sock, addr):
-        while 1:
-            try:
-                request = client_sock.recv(4098)
-                if request:
-                    http_method = request.split(b" ")[0]
-                    if http_method == "CONNECT":
-                        self.https_request(client_sock, addr, request)
-                    else:
-                        self.http_request(client_sock, addr, request)
+        
+        try:
+            request = client_sock.recv(4098)
+            if request:
+                http_method = request.split(b" ")[0]
+                if http_method == b"CONNECT":
+                    self.https_request(client_sock, addr, request)
                 else:
-                    client_sock.close()
-                    break 
-            except Exception as error:
-                raise error
+                    self.http_request(client_sock, addr, request)
+            else:
+                client_sock.close()
+        except Exception as error:
+            raise error
 
     def mainloop(self):
         proxy_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
