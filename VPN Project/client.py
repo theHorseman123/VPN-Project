@@ -38,6 +38,9 @@ class Client:
                 self.proxies.remove(proxy)
                 client_sock.close()
                 continue
+
+        
+        client_sock.settimeout(None)
         
         proxy_server = ":".join((proxy[0], str(proxy[1])))
 
@@ -48,6 +51,9 @@ class Client:
 
                 # Set proxy server address
                 winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, proxy_server)
+
+                while 1:
+                    print(client_sock.recv(4096))
 
         except FileNotFoundError:
             print("Registry key not found.")
@@ -86,10 +92,10 @@ class Client:
 
 def main():
     # Create server object
-    client = Client()
+    client = Client(host="10.100.102.93")
 
     # Start server
-    client.get_proxies()
+    client.get_proxies(server_ip="10.100.102.93")
     print(client.proxies)
     client.connect_proxy()
 
