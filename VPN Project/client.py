@@ -75,7 +75,6 @@ class Client:
             if data:
                 data = data.decode('utf-8')
                 data = data.split("/")
-                print(data)
                 for i in range(1, len(data), 2):
                     try:
                         self.proxies.append((data[i], int(data[i+1])))
