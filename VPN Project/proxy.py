@@ -6,13 +6,27 @@ from _thread import start_new_thread
 
 class Proxy:
 
-    def __init__(self, host="127.0.0.1", port=8080) -> None:
+    def __init__(self, host:str="127.0.0.1", port:int=8080) -> None:
+        """
+        Proxy's constructor
+        params: 
+        self variables
+        host - Proxy ip address
+        port - Proxy port number
+        """
         self.host = host
         self.port = port
 
 
-    def https_request(self, client_sock, addr, request):
-        
+    def https_request(self, client_sock: sock, addr: tuple, request: bytes):
+        """
+        https request handler
+        params:
+        self variables
+        client_sock - client's socket
+        addr - client's address: (ip, port)
+        request - client's https request 
+        """
         web_host, web_port = request.split(b" ")[1].split(b":")
         request_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
         
@@ -49,7 +63,15 @@ class Proxy:
             except Exception as error:
                 break 
     
-    def http_request(self, client_sock, addr, request):
+    def http_request(self, client_sock: sock, addr: tuple, request: bytes):
+        """
+        http request handler
+        params:
+        self variables
+        client_sock - client's socket
+        addr - client's address: (ip, port)
+        request - client's http request 
+        """
         # initializing socket to webserver
         host_line = [data for data in request.split(b"\r\n") if b"Host:" in data][0]
         print(host_line)
@@ -100,7 +122,14 @@ class Proxy:
         client_sock.close()
 
 
-    def client_handler(self, client_sock, addr):
+    def client_handler(self, client_sock: sock, addr:tuple):
+        """
+        Handle client's request
+        params:
+        self variables
+        client_sock- client's socket
+        addr- client's address: (ip, port)
+        """
         
         try:
             request = client_sock.recv(4098)
@@ -116,6 +145,11 @@ class Proxy:
             raise error
 
     def mainloop(self):
+        """
+        Proxy's mainloop which accepts new clients
+        params:
+        self variables
+        """
         proxy_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
         proxy_sock.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
 
@@ -132,7 +166,13 @@ class Proxy:
             raise error
 
     def notify_server(self, server_ip = "localhost", server_port = 1234):
-        
+        """
+        notify the server of the proxy's activity
+        params:
+        self variables
+        server_ip - server's ip address
+        server_port - server's port number 
+        """
         sock_proxy = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
         sock_proxy.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
 
