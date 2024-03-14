@@ -2,7 +2,7 @@
 
 ## server
 - support Socks5 username and password authentication and notify proxy for new clients
-- database for saved proxies
+- database for saved proxies and allowed clients
 - realtime proxy speed test
 - encryption
 - logger
@@ -13,7 +13,7 @@
 - encryption
 
 ## client
-- competability for multiple protocol types (maybe using cURL)
+- compatibility for multiple protocol types (maybe using cURL)
 - encryption
 - GUI
 - rotating proxies (optional)
