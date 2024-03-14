@@ -1,21 +1,15 @@
 # VPN-Project
 
-## First Milestone: simple proxy connection
+### Server: 
 
-For the first milestone I crated three diffrent files: proxy.py, server.py, client.py. 
-That I will explain one by one.
+The server binds to an address and wait for clients and proxies requests.
+The server can save new proxies and send clients their address.
 
-### Let's start with the server: 
+### Proxy: 
 
-The server is used to demonstrate an external server the client wants to send a request to.
-Once the server gets a message he will echo it back we'll know if he got the message.
+The proxy users an implementation of the protocol Socks5 which is a secure protocol that supports proxying of packets.
 
-### Next the proxy: 
+### Client:
 
-The proxy is the "bridge" between the server and the client. Once he gets a message he'll check if the message is from the server, if it is, he'll send it
-to all the connected clients, and if not, he'll send the message forward to the server.
-
-### And the client:
-
-The client is a simple loop that gets an input from the user and sends it to the proxy and if he gets messsage he'll print them.
+The firstly asks the server for addresses of proxies and then connects to it and exchanges data according to the protocol.
 
