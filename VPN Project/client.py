@@ -91,10 +91,10 @@ class Client:
 
 def main():
     # Create server object
-    client = Client(host="10.100.102.93")
+    client = Client()
 
     # Start server
-    client.get_proxies(server_ip="10.100.102.93")
+    client.get_proxies()
     print(client.proxies)
     client.connect_proxy()
 
