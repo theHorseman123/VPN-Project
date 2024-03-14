@@ -212,7 +212,7 @@ class Proxy:
 
 def main():
     # Create proxy object
-    proxy = Proxy(host="10.100.102.93")
+    proxy = Proxy()
 
     # Start proxy
     proxy.mainloop()
