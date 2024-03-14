@@ -3,6 +3,7 @@ import scapy.all
 from select import select
 from _thread import start_new_thread
 
+SOCKS_VER = 5
 
 class Proxy:
 
@@ -17,110 +18,59 @@ class Proxy:
         self.host = host
         self.port = port
 
-
-    def https_request(self, client_sock: sock, addr: tuple, request: bytes):
-        """
-        https request handler
-        params:
-        self variables
-        client_sock - client's socket
-        addr - client's address: (ip, port)
-        request - client's https request 
-        """
-        web_host, web_port = request.split(b" ")[1].split(b":")
-        request_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+        self.allowed_clients = [('username', 'password')]
         
+    
+    def get_available_methods(self, nmethods, connection):
+        methods = []
+        for _ in range(nmethods):
+            methods.append(ord(connection.recv(1)))
+        return methods
+
+    def verify_info(self, client_sock):
         try:
-            request_sock.connect((web_host.decode('utf-8'), int(web_port)))
-            print("connected succesfully to", (web_host, int(web_port)))
+            version = ord(client_sock.recv(1))
 
-        except Exception as error:
-            print("Couldn't Connect web server at:", (web_host, web_port))
-            client_sock.send(str(error).encode("utf-8"))
-            client_sock.close()
-        
-        reply = "HTTP/1.0 200 Connection established\r\nProxy-agent: HorseMan_Tunnel\r\n\r\n"
-        client_sock.send(reply.encode())
+            idlen = ord(client_sock.recv(1))
+            id = client_sock.recv(idlen).decode('utf-8')
 
-        request_sock.setblocking(False)
+            pwlen = ord(client_sock.recv(1))
+            pw = client_sock.recv(pwlen).decode('utf-8')
+
+            auth = (id, pw)
+
+            if auth not in self.allowed_clients:
+                return 1
+            
+            return 0
+            
+
+        except sock.error as error:
+            raise error
+            return 1
+
+    def packets_exchange(self, web_sock, client_sock):
+
+        web_sock.setblocking(False)
         client_sock.setblocking(False)
 
-        # transfer messages back and forth
         while 1:
-            try:
-                data = client_sock.recv(4098)
-                request.sendall(data)
-            except BlockingIOError as error:
-                pass
-            except Exception as error:
+            try: 
+
+                try:
+                    data = client_sock.recv(4096)
+                    web_sock.sendall(data)
+                except BlockingIOError:
+                    pass 
+
+                try:
+                    data = web_sock.recv(4096)
+                    client_sock.sendall(data)
+                except BlockingIOError:
+                    pass
+
+            except sock.error as error:
                 break
-
-            try:
-                data = request.recv(4098)
-                client_sock.sendall(data)
-            except BlockingIOError as error:
-                pass
-            except Exception as error:
-                break 
-    
-    def http_request(self, client_sock: sock, addr: tuple, request: bytes):
-        """
-        http request handler
-        params:
-        self variables
-        client_sock - client's socket
-        addr - client's address: (ip, port)
-        request - client's http request 
-        """
-        # initializing socket to webserver
-        host_line = [data for data in request.split(b"\r\n") if b"Host:" in data][0]
-        print(host_line)
-
-        if len(host_line) < 1:
-            client_sock.close()
-            return
-        
-        web_server_data = host_line.split(b":")[1:]
-        web_server, port = web_server_data[0].strip(), 80 if len(web_server_data) == 1 else web_server_data[1]
-
-        request_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-
-        try:
-            request_sock.connect((web_server.decode(), int(port)))
-        except Exception as error:
-            print("Failed to connect to:", (web_server.decode(), int(port)))
-            client_sock.close()
-            print(error)
-            return
-        
-        reply = request[:request.find(b" ") + 1] + request[request.find(b"/",request.find(b"//") + 2):]
-        try:
-            request_sock.sendall(reply)
-        except:
-            client_sock.close()
-            request_sock.close()
-            return
-
-        data = b''
-        data_fragment = b'1'
-
-        while data_fragment:
-            try:
-                data_fragment = request_sock.recv(4096)
-            except:
-                break
-
-            data = data + data_fragment
-        else:
-            try:
-                client_sock.sendall(data)
-            except:
-                client_sock.close()
-                request_sock.close()
-
-        request_sock.close()
-        client_sock.close()
-
 
     def client_handler(self, client_sock: sock, addr:tuple):
         """
@@ -131,19 +81,83 @@ class Proxy:
         addr- client's address: (ip, port)
         """
         
-        try:
-            request = client_sock.recv(4098)
-            if request:
-                http_method = request.split(b" ")[0]
-                if http_method == b"CONNECT":
-                    self.https_request(client_sock, addr, request)
-                else:
-                    self.http_request(client_sock, addr, request)
-            else:
-                client_sock.close()
-        except Exception as error:
-            raise error
+        ver, nauth = client_sock.recv(2)
+        # unsupported version
+        if ver != SOCKS_VER:
+            return
+        
+        methods = []
 
+        for _ in range(nauth):
+            methods.append(ord(client_sock.recv(1)))
+
+        # if the client doesn't authenticate using username and password close connection
+        if 2 not in methods:
+            return 
+        
+        client_sock.sendall(bytes([SOCKS_VER, 2]))
+
+        status = self.verify_info(client_sock)
+
+        if status != 0:
+            client_sock.sendall(bytes([1, status]))
+            client_sock.close()
+            return
+        
+        client_sock.sendall(bytes([1, status]))
+
+        error = None
+
+        ver, cmd, _, type = client_sock.recv(4)
+        if type == 1:
+            web_host = sock.inet_ntoa(client_sock.recv(4))
+        elif type == 3:
+            domain_length = client_sock.recv(1)[0]
+            domain = client_sock.recv(domain_length)
+            web_host = sock.gethostbyname(domain)
+        else:
+            error = 8 # address type not supported
+        port = int.from_bytes(client_sock.recv(2), 'big', signed=False)
+        
+        if cmd == 1:
+            try:
+                web_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+                web_sock.connect((web_host, port))
+                bind_address = web_sock.getsockname()
+                print(f"# Connected to {web_host}:{str(port)}")
+
+            except sock.error as exception:
+                raise exception
+                error == 5 # connection refused by destination host
+
+        else:
+            error = 7 # command not supported 
+
+        if error:
+            # send error reply
+            client_sock.sendall(bytes([SOCKS_VER.to_bytes(1, 'big')]
+                            , int(error).to_bytes(1, 'big') # error type
+                            , int(0).to_bytes(1, 'big')
+                            , int(0).to_bytes(1, 'big') # type: none
+                            , int(0).to_bytes(1, 'big')
+                            , int(0).to_bytes(2, 'big')))
+            return
+        
+        host = int.from_bytes(sock.inet_aton(bind_address[0]), 'big', signed=False)
+        port = bind_address[1]
+        
+        client_sock.sendall(b''.join([int(SOCKS_VER).to_bytes(1, 'big')
+                            , int(0).to_bytes(1, 'big') # request granted
+                            , int(0).to_bytes(1, 'big')
+                            , int(1).to_bytes(1, 'big') # type: IPv4
+                            , host.to_bytes(4, 'big')
+                            , port.to_bytes(2, 'big')]))
+        
+        self.packets_exchange(web_sock, client_sock)
+
+        web_sock.close()
+        client_sock.close()
+      
     def mainloop(self):
         """
         Proxy's mainloop which accepts new clients
@@ -156,10 +170,10 @@ class Proxy:
         try:
             proxy_sock.bind((self.host, self.port))
             proxy_sock.listen(5)
+            print(f"# Starting proxy server: {self.host}:{str(self.port)}")
             while 1:
-                print("Starting proxy server")
                 client_sock, addr = proxy_sock.accept()
-                print("New connection from:",(addr))
+                print(f"# New connection from: {addr[0]}:{addr[1]}")
                 start_new_thread(self.client_handler, (client_sock, addr))
 
         except Exception as error:
@@ -201,7 +215,6 @@ def main():
     proxy = Proxy(host="10.100.102.93")
 
     # Start proxy
-    proxy.notify_server(server_ip="10.100.102.93")
     proxy.mainloop()
     
 if __name__ == '__main__':
