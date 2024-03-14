@@ -13,7 +13,7 @@
 - encryption
 
 ## client
-- compatibility for multiple protocol types (maybe using cURL)
+- compatibility for multiple protocol types 
 - encryption
 - GUI
 - rotating proxies (optional)
