@@ -11,5 +11,5 @@ The proxy users an implementation of the protocol Socks5 which is a secure proto
 
 ### Client:
 
-The firstly asks the server for addresses of proxies and then connects to it and exchanges data according to the protocol.
+The client firstly asks the server for addresses of proxies and then connects to it and exchanges data according to the protocol.
 
