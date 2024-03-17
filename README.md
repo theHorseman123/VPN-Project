@@ -7,7 +7,7 @@ The server can save new proxies and send clients their address.
 
 ### Proxy: 
 
-The proxy users an implementation of the protocol Socks5 which is a secure protocol that supports proxying of packets.
+The proxy uses an implementation of the protocol Socks5 which is a secure protocol that supports proxying of packets.
 
 ### Client:
 
