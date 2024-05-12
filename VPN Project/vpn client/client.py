@@ -1,7 +1,8 @@
-import socket as sock
 import winreg
 import sys
 from _thread import start_new_thread
+from ..network_utils.sockets import *
+from cryptography.fernet import Fernet
 import os
 import rsa
 
@@ -16,12 +17,37 @@ class Client:
         self.__host = host
         self.__port = port
 
+        self.__server_socket = None
+        self.__server_public_key = None
+
         self.__username = username
         self.__password = password
 
+        self.__active_proxies = []
+
         self.__public_key, self.__private_key = self.__generate_keys(1024)
 
+    def get_proxies(self):
+        if not self.__server_socket:
+            return "No VPN server connected"
+        
+        send_message(self.__server_socket, "get_proxies//", self.__server_public_key)
+        
+        if not data:
+            return
 
+        data = receive_message(self.__server_socket, 1024, self.__private_key)
+        
+        if not data:
+            return
+        
+        data = data.split("//")
+        if not len(data) > 1:
+            return "No proxies returned"
+        data = data[0:]
+        self.__active_proxies = list(map(lambda x: x.split("/"), data.split("//")))
+        return self.__active_proxies
+    
     @staticmethod
     def __generate_keys(SIZE):
         # if one of the keys is missing, generate new ones
@@ -47,34 +73,40 @@ class Client:
         
         return public_key, private_key
 
-    def __connect_proxy(self):
-        pass
+    def __connect_to_proxy(self, addr):
+        proxy_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
 
-    def connect_server(self, addr):
-        server = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+        proxy_socket.connect(addr)
 
-        server.connect(addr)
-        
         # TODO: error management
-        data = server.recv(1024)
         
-        if data == "":
+        # Exchange asymetric keys
+
+        data_recived = proxy_socket.recv(1024)
+        
+        if data_recived == "":
             return
         
-        server_key = rsa.PublicKey.load_pkcs1(data)
+        proxy_public_key = rsa.PublicKey.load_pkcs1(data_recived)
 
-        server.sendall(self.__public_key.save_pkcs1("PEM"))
-        while 1:
-            data = input().encode('utf-8')
-            msg = rsa.encrypt(data, server_key)
-            server.send(msg)
+        proxy_socket.sendall(self.__public_key.save_pkcs1("PEM"))
 
-            data = server.recv(1024)
-            if data == "":
-                return
-            print(rsa.decrypt(data, self.__private_key).decode('utf-8'))
-            
-            
+    def connect_server(self, server_address):
+        
+        self.__server_socket = connect_to_destination(server_address)
+        if not self.__server_socket: # couldnt connect to server
+            return
+        
+        data = self.__receive_message(self.__server_socket, 1024)
+        
+        if not data:
+            return
+        
+        self.__server_public_key = rsa.PublicKey.load_pkcs1(data)
+
+        send_message(self.__server_socket, self.__public_key.save_pkcs1("PEM"))
+
+
 def main():
     # Create server object
     client = Client()
