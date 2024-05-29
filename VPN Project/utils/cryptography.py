@@ -1,4 +1,7 @@
 import rsa
+from cryptography.fernet import Fernet
+import base64
+import hashlib
 import os
 
 def generate_keys(SIZE, PATH):
@@ -23,22 +26,33 @@ def generate_keys(SIZE, PATH):
         
         return public_key, private_key
 
+def aes_generate_key(passkey=None):
+    if passkey:
+        # Derive a key from the password using SHA-256 hash function
+        key = hashlib.sha256(passkey.encode()).digest()
+
+            # Ensure the key length is 32 bytes for Fernet
+        key = base64.urlsafe_b64encode(key[:32])
+
+        return Fernet(key)
+    
+    return Fernet(Fernet.generate_key())
+ 
+def aes_retreive_key(fernet:Fernet):
+    retrieved_key = fernet._signing_key + fernet._encryption_key
+    return base64.urlsafe_b64encode(retrieved_key)
+
+
 def verify_key_validity(public_key):
     pass
 
 def rsa_encrypt_message(message, public_key):
-    try:
-        return rsa.encrypt(message.encode("utf-8"), public_key)
-    except Exception as error:
-        print(f"encryption error: {str(error)}")
-        return
+    return rsa.encrypt(message.encode("utf-8"), public_key)
     
 def rsa_decrypt_message(message, private_key):
-    try:
-        return rsa.decrypt(message, private_key).decode("utf-8")
-    except Exception as error:
-        print(f"decryption error: {str(error)}")
-        return
+    return rsa.decrypt(message, private_key).decode("utf-8")
+
+
 
 def hash_data(data):
     pass

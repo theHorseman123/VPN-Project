@@ -1,7 +1,6 @@
 import socket as sock
 import os
 from _thread import start_new_thread
-import re
 import rsa
 # from database import Proxies
 import sys
@@ -11,7 +10,7 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from utils.cryptography import *
 
-SECRET_CODE = "secret-horseman-NMEX123"
+PROXY_SECRET_KEY = aes_generate_key("secret-horseman-NMEX123")
 
 
 def send(socket, data):
@@ -24,32 +23,27 @@ def receive(socket:sock):
     try:
         message_size = socket.recv(8)
     except sock.error as error:
-        print(f"socket error: {str(error)}")
+        print(f"ERROR: {str(error)}")
         return 
-    if not message_size:
-        print(f"server disconnected")
+    if message_size == b"":
         return
     try:
         message_size = int(message_size)
     except ValueError:
-        print("no message size supllied")
         return
 
     message = b''
     while len(message) < message_size:
         try:
             msg_fragment = socket.recv(message_size - len(message))
-            print(msg_fragment)
         except sock.error as error:
-            print(f"socket error: {str(error)}")
+            print(f"ERROR: {str(error)}")
             return 
         
         if not msg_fragment:
-            print("server has discconected")
+            print(" INFO: socket has discconected at:", (socket.getsockname()))
             return 
         message = message + msg_fragment
-    
-    print(message)
     return message
 
 
@@ -61,6 +55,7 @@ class Server:
         self.__public_key, self.__private_key = generate_keys(1024, "auth server")
 
         self.__active_proxies = {}
+        self.__proxy_sockets = {}
 
         self.__host = host
         self.__port = port
@@ -69,57 +64,77 @@ class Server:
         # self.__proxies_database = Proxies()
         
     def __client_handler(self, client_socket, client_address) -> None:
-        send(client_socket, self.__public_key.save_pkcs1("PEM"))
-        data = receive(client_socket) # recieves the client public key 
-        if not data:
-            return
-        
-        # TODO: verify key validity
-        client_key = rsa.PublicKey.load_pkcs1(data)
-
-        # TODO: error exception
-        while 1:
-            encrypted_data = receive(client_socket)
-            data = rsa_decrypt_message(encrypted_data, self.__private_key)
-
-            if not data:
+        try:
+            send(client_socket, self.__public_key.save_pkcs1("PEM"))
+            encrypted_data = receive(client_socket) # recieves the client symmetric key 
+            if not encrypted_data:
+                client_socket.close()
                 return
-            
-            data = self.__msg_handler(data, client_address)
-            
-            if data:
-                encrypted_data = rsa_encrypt_message(data, client_key)
+            try:
+                key = rsa_decrypt_message(encrypted_data, self.__private_key)
+                client_key = Fernet(key)
+                encrypted_data = client_key.encrypt(b"pass")
                 send(client_socket, encrypted_data)
-             
-    def __msg_handler(self, msg, addr):
+            except ValueError:
+                print(" INFO: Client supplied a non valid key")
+                data = b"no key suplied"
+                send(client_socket, data)
+                print(" *Closing connection with:", client_address)
+                client_socket.close()
+
+            while 1:
+                    encrypted_data = receive(client_socket)
+
+                    if not encrypted_data:
+                        client_socket.close()
+                        return
+                    
+                    data = client_key.decrypt(encrypted_data)
+                    
+                    data = self.__msg_handler(data.decode(), client_socket)
+                    
+                    if data:
+                        encrypted_data = client_key.encrypt(data.encode())
+                        send(client_socket, encrypted_data)
+        
+        except sock.error as error:
+            print(f"ERROR: {error}")
+            if client_socket in list(self.__proxy_sockets.key()):
+                del self.__active_proxies[self.__proxy_sockets[client_socket]]
+                del self.__proxy_sockets[client_socket]
+            client_socket.close()
+
+    def __msg_handler(self, msg, socket):
         data = msg.split("//")
+        print(data)
         if len(data) != 2: # a request should have: request_type//data
             return "insuf info" 
 
-        function = data[0]
+        function, data = data
+
         if (function) not in ("get_proxies", "new_proxy", "get_proxy_key"):
             return "function_not_found"
         
-        """
-        if (function) in ("update_proxy", "new_proxy"):
-            pass # TODO: symmetric decryption using the secret code
-        """
-
-        data = data[1].split("/")
+        if (function) in ("new_proxy", ):
+            # To create a proxy you need a special key to authenticate you are trustworthy
+            data = PROXY_SECRET_KEY.decrypt(data).decode()
+            
+        data = data.split("|")
         
         try:
-            msg = eval(f"self.{function}(data, addr)")
+            msg = eval(f"self.{function}(data, socket)")
         except TypeError as error:
             print(f"error in message handel: {str(error)}")
             return
         
         return msg
 
-    def get_proxies(self, data, addr):
+    def get_proxies(self, data, socket):
         # proxies: proxies_list//addr/locked(1/0)//addr/locked(1/0)...
         msg = "proxies_list"
-        for addr, lock_status in self.__active_proxies.items():
-            msg+=f"//{addr}/{lock_status}"
+        for address, lock_status in self.__active_proxies.items():
+            msg+=f"//{address}|{lock_status[0]}"
+        return msg
 
     """
     def update_proxy(self, data, addr):
@@ -139,26 +154,30 @@ class Server:
             return self.__proxies_database.new_proxy((data[0], data[1], data[2],  f"{addr[0]}:{str(addr[1])}"))
     """    
 
-    def get_proxy_key(self, data, addr):
+    def get_proxy_key(self, data, socket):
         # return: publickey | data: proxy ipaddr:port
-        addr = data.split(":")
+        proxy_address = data[0]
         try:
-            public_key = self.__active_proxies[addr][1]
-            return public_key.save_pkcs1("PEM")
+            public_key = self.__active_proxies[proxy_address][1]
+            print(public_key)
+            return public_key.save_pkcs1("PEM").decode()
         except AttributeError:
-            del self.__active_proxies(addr)
+            del self.__active_proxies[proxy_address]
         except:
             pass
         return "not_found"
 
-    def new_proxy(self, data, addr):
+    def new_proxy(self, data, socket):
         # new proxy data: locked(1/0)/proxy publickey  
-        if len(data) == 1:
+        if len(data) == 3:
             try:
-                self.__active_proxies.update({addr:(data[0],rsa.PublicKey.load_pkcs1(data[1]))})
-                print(" INFO: New proxy connected from", (addr))
+                print(data)
+                self.__active_proxies.update({data[0]: (data[1], rsa.PublicKey.load_pkcs1(data[2]))})
+                self.__proxy_sockets = {socket: data[0]}
+                print(" INFO: New proxy connected from", (socket.getsockname()))
                 return "pass"
-            except AttributeError:
+            except AttributeError as error:
+                print(f"ERROR: {str(error)}")
                 return "invalid_key"
         return "wrong_input"
 
