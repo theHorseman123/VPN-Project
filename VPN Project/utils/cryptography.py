@@ -26,6 +26,18 @@ def generate_keys(SIZE, PATH):
         
         return public_key, private_key
 
+def generate_base64(SIZE):
+    random_bytes = os.urandom(SIZE)
+    base64_encoded_bytes = base64.b64encode(random_bytes)
+    return base64_encoded_bytes
+
+def generate_random_base64(length: int) -> str:
+    # Generate random bytes
+    random_bytes = os.urandom(length)
+    # Encode the bytes to base64
+    base64_encoded = base64.b64encode(random_bytes).decode('utf-8')
+    return base64_encoded
+
 def aes_generate_key(passkey=None):
     if passkey:
         # Derive a key from the password using SHA-256 hash function
@@ -47,11 +59,16 @@ def verify_key_validity(public_key):
     pass
 
 def rsa_encrypt_message(message, public_key):
-    return rsa.encrypt(message.encode("utf-8"), public_key)
-    
-def rsa_decrypt_message(message, private_key):
-    return rsa.decrypt(message, private_key).decode("utf-8")
+    try:
+        return rsa.encrypt(message.encode("utf-8"), public_key)
+    except:
+        return
 
+def rsa_decrypt_message(message, private_key):
+    try:
+        return rsa.decrypt(message, private_key).decode("utf-8")
+    except:
+        return 
 
 
 def hash_data(data):

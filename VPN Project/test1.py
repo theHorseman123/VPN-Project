@@ -1,23 +1,19 @@
-import socket as sock
-from _thread import start_new_thread
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import QFont
 
-def client_handler(socket):
-    while 1:
-        data = socket.recv(1024)
-        
-        if data == "":
-            return
-        
-        print(data)
+def main():
+    app = QApplication([])
+    window = QWidget()
+    window.setGeometry(100, 100, 200, 300)
+    window.setWindowTitle("VPN client")
 
-server_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-server_socket.bind(("localhost", 1234))
-server_socket.listen(5)
-print(" *Starting server on", (server_socket.getsockname()))
 
-while 1:
-    
-    socket, _ = server_socket.accept()
-    print(" *New connection from:", (socket.getsockname()))
-    start_new_thread(client_handler, (socket, ))
+    label = QLabel(window)
+    label.setText("hello")
+    label.setFont(QFont("Arial", 16))
 
+    window.show()
+    app.exec_()
+
+if __name__ == "__main__":
+    main()

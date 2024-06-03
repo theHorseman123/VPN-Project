@@ -3,10 +3,10 @@ import sys
 import socket as sock
 from select import select
 from _thread import start_new_thread
+import threading
 from cryptography.fernet import Fernet
 import os
 import rsa
-import pydivert
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -14,18 +14,18 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 from utils.cryptography import *
 
 
-def enable_proxy():
+def enable_proxy(addr):
     # this function sends the user traffic to localhost:5555  
     internet_settings = r'Software\Microsoft\Windows\CurrentVersion\Internet Settings'
     
     try:
         with reg.OpenKey(reg.HKEY_CURRENT_USER, internet_settings, 0, reg.KEY_SET_VALUE) as key:
             # Set the proxy server to the specified address
-            reg.SetValueEx(key, 'ProxyServer', 0, reg.REG_SZ, "localhost:5555")
+            reg.SetValueEx(key, 'ProxyServer', 0, reg.REG_SZ, addr)
             # Enable the proxy by setting the ProxyEnable value to 1
             reg.SetValueEx(key, 'ProxyEnable', 0, reg.REG_DWORD, 1)
             
-            print(f' *Proxy settings updated: localhost:5555')
+            print(f' *Proxy settings updated: {addr}')
             return True
         
     except Exception as error:
@@ -61,6 +61,7 @@ def receive(socket:sock):
         print(f"ERROR: {str(error)}")
         return 
     if message_size == b"":
+        print(" INFO: socket has disconnected at:", (socket.getpeername()))
         return
     try:
         message_size = int(message_size)
@@ -76,20 +77,15 @@ def receive(socket:sock):
             return 
         
         if msg_fragment == b"":
-            print(" INFO: socket has discconected at:", (socket.getsockname()))
+            print(" INFO: socket has disconnected at:", (socket.getpeername()))
             return 
         message = message + msg_fragment
     return message
 
-
-
 class Client:
-    def __init__(self, host = "localhost", port = 0, server_address=("localhost", 1234)):
+    def __init__(self, interface=None, server_address=("localhost", 1234)):
 
-        self.__host = host
-        self.__port = port
-
-        self.__server_address = (server_address)
+        self.server_address = (server_address)
         self.__server_socket = None
 
         self.__active_proxies = []
@@ -100,35 +96,28 @@ class Client:
 
     def start_client(self):
 
-        status = self.__connect_server()
+        status = self.connect_server()
         if not status:
             return
         
         status = self.__get_proxies()
         if not status:
             return
-        proxies = self.__active_proxies[0]
-        proxy_address = proxies[0]
-        status = self.__get_proxy_key(proxy_address)
-        
-        if not status[1]:
-            print(status[0])
-            return
-        proxy_public = status[0]
-        proxy_address = proxy_address.split(":")
-        proxy_address = (proxy_address[0], int(proxy_address[1]))
+        proxies = self.__active_proxies[0] # addr:port format
+        return proxies
+    
+    def app_proxy_connect(self, proxy):
+        proxy_addr = proxy[0]
+        status = self.__get_proxy_key(proxy_addr)
 
-        while 1:
-            status = self.__connect_to_proxy(proxy_address, proxy_public)
-            if not status[1]:
-                print(status[0])
-                return
-            
-            proxy_socket, proxy_key = status[0] # socket to communicate on and a symmetric key
-            
-            self.__start_outer_client(proxy_key, proxy_socket)
-        
-    def __get_proxy_key(self, proxy_addr):
+        if not status[1]:
+            return f" INFO: {status[0]}", 
+        proxy_address = (proxy_addr.split(":")[0], int(proxy_addr.split(":")[1]))
+        proxy_public = status[0]
+
+        self.__start_outer_client(proxy_address, proxy_public)
+   
+    def get_proxy_key(self, proxy_addr):
         # return: wanted proxy public key and True/False
         data = (f"get_proxy_key//{proxy_addr}").encode()
         encrypted_data = self.__server_key.encrypt(data)
@@ -144,7 +133,7 @@ class Client:
             return " INFO: Proxy not found", False
         return rsa.PublicKey.load_pkcs1(data), True
 
-    def __get_proxies(self):
+    def get_proxies(self):
         if not self.__server_socket:
             return "No VPN server connected"
         data = b"get_proxies//"
@@ -152,20 +141,31 @@ class Client:
         send(self.__server_socket, encrypted_data)
         encrypted_data = receive(self.__server_socket)
         if not encrypted_data:
-            return
+            return "Server left"
         
         data = self.__server_key.decrypt(encrypted_data).decode()
-        print(data)
-        data = data.split("//")
-        
-        data = data[1:]
-        self.__active_proxies = list(map(lambda x: x.split("|"), data))
+        self.__active_proxies = [proxy.split("|") for proxy in data.split("//")][1:]
         return self.__active_proxies
 
-    def __connect_to_proxy(self, proxy_address, proxy_public):
+    def __connect_to_proxy(self, proxy_address, proxy_public, secret_code=None, session_id=None, proxy_key=None):
         try:
             proxy_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
             proxy_socket.connect(proxy_address)
+
+
+            if session_id and proxy_key: # if the client already has an encrypted session with proxy
+                encrypted_data = rsa_encrypt_message(session_id.decode(), proxy_public)
+                send(proxy_socket, encrypted_data)
+                encrypted_data = receive(proxy_socket)
+                if not encrypted_data:
+                    return " INFO: Proxy left", False
+                
+                data = proxy_key.decrypt(encrypted_data)
+                if data == b"pass":
+                    return (proxy_socket, proxy_key, session_id), True
+            else:
+                send(proxy_socket, rsa_encrypt_message("pass", proxy_public))
+
 
             data = receive(proxy_socket)
             
@@ -173,7 +173,8 @@ class Client:
                 return " INFO: Proxy left", False
             
             if data == b"secret_code_required":
-                secret_code = input(f"{proxy_address[0]}:{str(proxy_address[1])} is asking for a code, please insert: ")
+                if not secret_code:
+                    secret_code = input(f"{proxy_address[0]}:{str(proxy_address[1])} is asking for a code, please insert: ")
                 encrypted_code = rsa_encrypt_message(secret_code, proxy_public)
                 send(proxy_socket, encrypted_code)
                 status = receive(proxy_socket)
@@ -186,27 +187,32 @@ class Client:
             proxy_key = aes_generate_key()
             data = aes_retreive_key(proxy_key)
             encrypted_data = rsa_encrypt_message(data.decode(), proxy_public)
-            
             send(proxy_socket, encrypted_data)
 
-            return (proxy_socket, proxy_key), True
+            encrypted_data = receive(proxy_socket)
+            
+            if not encrypted_data:
+                return " INFO: Proxy left", False
+            
+            session_id = proxy_key.decrypt(encrypted_data)
+
+            return (proxy_socket, proxy_key, session_id), True
         
         except sock.error as error:
             proxy_socket.close()
             return f" Error:{str(error)}", False
         
-    def __connect_server(self):
+    def connect_server(self):
         try:
             self.__server_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-            self.__server_socket.connect((self.__server_address))
-        except sock.error as error:
-            print(f"couldn't connect to the server: {str(error)}")
+            self.__server_socket.connect((self.server_address))
+        except Exception as error:
+            return f" ERROR: {str(error)}"
         
         data = receive(self.__server_socket)
         
         if not data:
-            print(" INFO: server disconnected")
-            return
+            return " INFO: server disconnected"
         
         server_public_key = rsa.PublicKey.load_pkcs1(data)
 
@@ -217,57 +223,59 @@ class Client:
         encrypted_data = receive(self.__server_socket)
 
         if not data:
-            return
+            return " INFO: server disconnected"
 
         data = self.__server_key.decrypt(encrypted_data)
         if data == b"pass":
             return "pass"
 
-    def __start_outer_client(self, proxy_key, proxy_socket):
-        try:
-            server_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-            self.__server_socket.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
-            server_socket.bind(("localhost", 5555))
-            server_socket.listen(5)
-            
-            enable_proxy()
-
-            proxy_socket.setblocking(False)
-
-        except sock.error as error:
-            print(f"ERROR: {str(error)}")
+    def start_outer_client(self, proxy_address, proxy_public, proxy_key=None, session_id=None, secret_code=None):
+        status = self.__connect_to_proxy(proxy_address=proxy_address, proxy_public=proxy_public, secret_code=secret_code, session_id=session_id, proxy_key=proxy_key)
+        if not status[1]:
+            print(f" INFO: cant connect to proxy: {status[0]}")
             return
-        print(" *Starting server on", (server_socket.getsockname()))
-        try:    
-            while 1:
-                if not proxy_socket:
-                    print(f" INFO: Proxy left")
-                    print(" *Disabling proxy")
-                    disable_proxy()
-                    return 
+        proxy_socket, proxy_key, session_id = status[0]
+        proxy_socket.close()
+        
+        outer_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+        outer_socket.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
+        outer_socket.bind(("localhost", 5555))
+        outer_socket.listen(5)
 
-                socket, addr = server_socket.accept()
-                start_new_thread(self.__request_handler, (socket, proxy_socket, proxy_key))
+        enable_proxy("localhost:5555")
 
+
+        proxy_offline = threading.Event()
+        try:
+            while not proxy_offline.is_set():
+                socket, _  = outer_socket.accept()
+                start_new_thread(self.__request_handler, (socket, proxy_address, proxy_key, session_id, secret_code, proxy_public, proxy_offline))
         except sock.error as error:
-            print(f" ERROR: {str(error)}")
-            print(" *Disabling proxy")
             disable_proxy()
-            proxy_socket.close()     
+            raise error
+            print(f" ERROR:{str(error)}")
+            proxy_offline.set()
+        disable_proxy()
 
-    def __request_handler(self, socket:sock, proxy_socket:sock, proxy_key):
-        socket.setblocking(False)
+    def __request_handler(self, socket:sock, proxy_address, proxy_key, session_id, secret_code, proxy_public, proxy_offline):
+        status = self.__connect_to_proxy(proxy_address=proxy_address, proxy_public=proxy_public, secret_code=secret_code, session_id=session_id, proxy_key=proxy_key)
+        if not status[1]:
+            print(f" INFO: cant connect to proxy: {status[0]}")
+            return
+        
+        proxy_socket, proxy_key, _ = status[0]
+        
         readlist = [socket, proxy_socket]
         
-        while 1:
+        while not proxy_offline.is_set():
             try:
                 read_sockets, _, _ = select(readlist, [], [])
                 for read_socket in read_sockets:
                     if read_socket is socket:
                         data = socket.recv(4096)
-                        print(data)
                         if data == b"":
                             socket.close()
+                            proxy_socket.close()
                             return
 
                         encrypted_data = proxy_key.encrypt(data)
@@ -276,24 +284,36 @@ class Client:
 
                     else:
                         encrypted_data = receive(proxy_socket)
-                    
-                        if not encrypted_data:
-                            proxy_socket.close()
-                            socket.close()
-                            return
-                        
-                        data = proxy_key.decrypt(data)
-                        print(data)
-                        socket.sendall(data.encode("utf-8"))
-            except:
-                socket.close()
-                return
 
+                        if not encrypted_data:
+                            proxy_offline.set()
+                            socket.close()
+                            proxy_socket.close()
+                            return
+                        data = proxy_key.decrypt(encrypted_data)
+                        if data == b"close":
+                            socket.close()
+                            proxy_socket.close()
+                            return
+                        socket.sendall(data)
+            except sock.error as error:
+                #print(f" ERROR:{error}")
+                if read_socket is proxy_socket:
+                    proxy_offline.set()
+                proxy_socket.close()
+                return
+            
+        proxy_socket.close()
+        socket.close()
 
 def main():
     # Create server object
-    client = Client()
-    client.start_client()
+    client = Client(server_address=(sock.gethostbyname(sock.gethostname()), 1234))
+    
+    proxies = client.start_client()
+    print(proxies)
+    proxy = proxies[0]
+    client.app_proxy_connect(proxy)
 
 if __name__ == '__main__':
     main()

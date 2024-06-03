@@ -41,14 +41,14 @@ def receive(socket:sock):
             return 
         
         if not msg_fragment:
-            print(" INFO: socket has discconected at:", (socket.getsockname()))
+            print(" INFO: socket has discconected at:", (socket.getpeername()))
             return 
         message = message + msg_fragment
     return message
 
 
 class Server:
-    def __init__(self, host:str = "localhost", port:int=1234) -> None:
+    def __init__(self, host:str = sock.gethostbyname(sock.gethostname()), port:int=1234) -> None:
         self.__server_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
         self.__server_socket.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
 
@@ -86,7 +86,7 @@ class Server:
                     encrypted_data = receive(client_socket)
 
                     if not encrypted_data:
-                        client_socket.close()
+                        self.__close_connection(client_socket)
                         return
                     
                     data = client_key.decrypt(encrypted_data)
@@ -97,12 +97,19 @@ class Server:
                         encrypted_data = client_key.encrypt(data.encode())
                         send(client_socket, encrypted_data)
         
-        except sock.error as error:
+        except Exception as error:
             print(f"ERROR: {error}")
-            if client_socket in list(self.__proxy_sockets.key()):
-                del self.__active_proxies[self.__proxy_sockets[client_socket]]
-                del self.__proxy_sockets[client_socket]
-            client_socket.close()
+            self.__close_connection(client_socket)
+            return
+    
+    def __close_connection(self, socket):
+        if socket in list(self.__proxy_sockets.keys()):
+            print(" *Closing connection with proxy:", (socket.getpeername()))
+            del self.__active_proxies[self.__proxy_sockets[socket]]
+            del self.__proxy_sockets[socket]
+        else:
+            print(" *Closing connectiong with client:", (socket.getpeername()))
+        socket.close()
 
     def __msg_handler(self, msg, socket):
         data = msg.split("//")
@@ -174,7 +181,7 @@ class Server:
                 print(data)
                 self.__active_proxies.update({data[0]: (data[1], rsa.PublicKey.load_pkcs1(data[2]))})
                 self.__proxy_sockets = {socket: data[0]}
-                print(" INFO: New proxy connected from", (socket.getsockname()))
+                print(" INFO: New proxy connected from", (socket.getpeername()))
                 return "pass"
             except AttributeError as error:
                 print(f"ERROR: {str(error)}")
@@ -197,7 +204,7 @@ class Server:
 
     
 def main():
-    server = Server()
+    server = Server(host=sock.gethostbyname(sock.gethostname()))
     server.start()
 
 if __name__ == '__main__':

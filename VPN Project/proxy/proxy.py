@@ -26,10 +26,11 @@ def receive(socket:sock):
     try:
         message_size = socket.recv(8)
     except sock.error as error:
-        print(f"ERROR: {str(error)}")
-        return 
+        return
+    
     if message_size == b"":
         return
+    
     try:
         message_size = int(message_size)
     except ValueError:
@@ -40,7 +41,6 @@ def receive(socket:sock):
         try:
             msg_fragment = socket.recv(message_size - len(message))
         except sock.error as error:
-            print(f"ERROR: {str(error)}")
             return 
         
         if msg_fragment == b"":
@@ -62,21 +62,22 @@ class Proxy:
 
         self.__public_key, self.__private_key = generate_keys(1024, "proxy")
 
-        self.__server_address = server_address
+        self.server_address = server_address
         self.__server_key = aes_generate_key()
         self.__server_socket = None
 
         self.__clients = {}
+        self.__sessions = {}
 
-    def __close_connection(self, socket):
-        print(" *Closing connection with:",(socket.getsockname()))
+    def __close_connection(self, socket, addr):
+        print(" *Closing connection with:",(addr))
         del self.__clients[socket]
         socket.close()
 
     def __connect_to_server(self):
         try:
             self.__server_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-            self.__server_socket.connect(self.__server_address)
+            self.__server_socket.connect(self.server_address)
         except sock.error as error:
             print(f" ERROR: {str(error)}")
         
@@ -149,99 +150,20 @@ class Proxy:
 
         while 1:
             try:
-                socket, _ = self.__proxy_socket.accept()
-                start_new_thread(self.__client_handler, (socket, ))
+                socket, addr = self.__proxy_socket.accept()
+                print(f" INFO: New connection from:", (addr))
+                start_new_thread(self.__client_handler, (socket, addr))
             except sock.error as error:
-                print(f"ERROR: {str(error)}")
+                print(f"ERROR: {str(error)}")   
 
-    def __client_handler(self, socket):
-        
-        if self.__secret_code:
-            data = b"secret_code_required"
-            send(socket, data) 
-            # the client gets the proxy public key from the server
-            encrypted_data = receive(socket)
-            data = rsa_decrypt_message(encrypted_data, self.__private_key)
-            if data != self.__secret_code:
-                data = b"wrong_code"
-                send(socket, data)
-                print(" *Closing connection with:",socket.getsockname())
-                socket.close()
-                return
-            data = b"pass"
-            send(socket, data)
-        
-        send(socket, b"send_key")
+    def __client_handler(self, socket, addr):
         encrypted_data = receive(socket)
-        print(encrypted_data)
-        if not encrypted_data:
-            print(" *Closing connection with:", (socket.getsockname()))
-            socket.close()
-            return
-        
-        key = rsa_decrypt_message(encrypted_data, self.__private_key)
+        session_id = rsa_decrypt_message(encrypted_data, self.__private_key)
+        if session_id in self.__sessions.keys():
+            client_key = self.__sessions[session_id]
+            send(socket, client_key.encrypt(b"pass"))
 
-        try:
-            client_key = Fernet(key)
-        except ValueError:
-            print(" *Closing connection with:", (socket.getsockname()))
-            return
-
-        self.__clients.update({socket:client_key})
-        
-        print(" INFO: New connection from:", (socket.getsockname()))
-        try:
-            while 1:
-                encrypted_data = receive(socket)
-                if not encrypted_data:
-                    self.__close_connection(socket)
-                    return
-                data = self.__clients[socket].decrypt(encrypted_data)
-                data = data.split(b" ")
-                if not data[0] == b"CONNECT": # The proxy only accepts HTTPS requests
-                    continue
-                print(data)
-                addr = data[1].decode()
-                addr = addr.split(":")
-                remote_address = (addr[0], int(addr[1]))
-                remote_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-                try:
-                    remote_socket.connect(remote_address)
-                    print(1)
-                    self.__requests_exchange_loop(socket, remote_socket)
-                except sock.error as error:
-                    print(f" ERROR: {str(error)}")
-                    continue
-        except sock.error as error:
-            print(f" ERROR: {str(error)}")
-
-            
-    def __requests_exchange_loop(self, client_socket, remote_socket):
-        client_key = self.__clients[client_socket]
-        while 1:
-            read_socket, _, _ = select([client_socket, remote_socket], [], [])
-
-            if client_socket in read_socket:
-                encrypted_data = receive(client_socket)
-
-                if not encrypted_data:
-                    return
-                
-                data = client_key.decrypt(encrypted_data)
-                print(data)
-                remote_socket.sendall(data)
-            
-            if remote_socket in read_socket:
-                data = remote_socket.recv(4096)
-
-                if data == b"":
-                    return
-                
-                encrypted_data = client_key.encrypt(data)
-                send(client_socket, encrypted_data)
-                
-    def __connection_handler(self, socket):
-        try:
+        else:
             if self.__secret_code:
                 data = b"secret_code_required"
                 send(socket, data) 
@@ -259,26 +181,95 @@ class Proxy:
             
             send(socket, b"send_key")
 
-            key = receive(socket)
+            encrypted_data = receive(socket)
+            key = rsa_decrypt_message(encrypted_data, self.__private_key)
 
             try:
                 client_key = Fernet(key)
-            except ValueError:
-                print(" *Closing connection with:", (socket.getsockname()))
-                return
-
-            self.__clients.update({socket:client_key})
+                session_id = generate_random_base64(8)
+                encrypted_data = client_key.encrypt(session_id.encode("utf-8"))
+                send(socket, encrypted_data)
+                self.__sessions.update({session_id:(client_key)})
+            except Exception as error:
+                print(f" ERROR: {str(error)}")
+                print(" *Closing connection with:", (addr))
+                raise error
             
-            print(" INFO: New connection from:", (socket.getsockname()))
+        self.__clients.update({socket:client_key})
+            
+        print(" INFO: New client from:", (addr)) 
 
+        encrypted_data = receive(socket)
+        if not encrypted_data:
+            self.__close_connection(socket, addr)
+            return
+        data = client_key.decrypt(encrypted_data)
+        if data.split(b" ")[0] == b"CONNECT": # The proxy only accepts HTTPS requests
+            self.__requests_exchange_loop(socket, data)
+        else:
+            print(data)
+            # The proxy only allows secured http requests
+            response = "HTTP/1.1 405 Not Allowed\r\n"
+            response += "Content-Type: text/html\r\n"
+            response += "\r\n"
+            response += "<h1>The Horseman Tunnels service has blocked your connection.</h1>"
+            socket.send(response.encode("utf-8"))
+                
+        socket.close()
+
+    
+
+    def __requests_exchange_loop(self, client_socket, request):
+        
+        client_key = self.__clients[client_socket]
+
+        host, port = request.split(b" ")[1].split(b":")
+        remote_address = (host.decode(), int(port))
+        remote_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+        try:
+            remote_socket.connect(remote_address)
+            print(" INFO: Established connection with:", (remote_address))
         except sock.error as error:
-            print(f"ERROR: {error}")
-            print(" *Closing connection with:", (socket.getsockname()))
+            print(f" ERROR: {error}")
+            send(client_socket, client_key.encrypt(b"send"))
+            return
+        
+        data = "HTTP/1.0 200 Connection established\r\n"
+        data += "Proxy-agent: Horseman-tunnels\r\n"
+        data += "\r\n"
+        send(client_socket, client_key.encrypt(data.encode()))
 
+        
+        client_key = self.__clients[client_socket]
+        try:
+            while 1:
+                read_socket, _, _ = select([client_socket, remote_socket], [], [])
 
+                if client_socket in read_socket:
+                    encrypted_data = receive(client_socket)
+
+                    if not encrypted_data:
+                        return
+                    
+                    data = client_key.decrypt(encrypted_data)
+                    remote_socket.sendall(data)
+                
+                if remote_socket in read_socket:
+                    data = remote_socket.recv(4096)
+
+                    if data == b"":
+                        send(client_socket, client_key.encrypt(b'close'))
+                        return
+                    
+                    encrypted_data = client_key.encrypt(data)
+                    send(client_socket, encrypted_data)
+        except:
+            send(client_socket, client_key.encrypt(b'close'))
+            return
+        
 def main():
     # Create proxy object
-    proxy = Proxy(host="10.100.102.93")
+    proxy = Proxy(host=sock.gethostbyname(sock.gethostname()), server_address=(sock.gethostbyname(sock.gethostname()), 1234))
 
     # Start proxy
     proxy.mainloop()
