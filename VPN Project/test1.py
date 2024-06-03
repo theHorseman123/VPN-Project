@@ -1,19 +1,16 @@
-from PyQt5.QtWidgets import *
-from PyQt5.QtGui import QFont
+import time
 
-def main():
-    app = QApplication([])
-    window = QWidget()
-    window.setGeometry(100, 100, 200, 300)
-    window.setWindowTitle("VPN client")
+# Perform a small operation to measure
+def small_operation():
+    x = 0
+    for _ in range(99999999):
+        x += 1
+    return x
 
+# Measure the small operation time
+start_time = time.time_ns()
+small_operation()
+end_time = time.time_ns()
 
-    label = QLabel(window)
-    label.setText("hello")
-    label.setFont(QFont("Arial", 16))
-
-    window.show()
-    app.exec_()
-
-if __name__ == "__main__":
-    main()
+elapsed_time = (end_time - start_time)*(10**-6) # Convert to microseconds
+print(f"Elapsed time using time_ns: {elapsed_time:.3f} ms")

@@ -113,7 +113,6 @@ class Server:
 
     def __msg_handler(self, msg, socket):
         data = msg.split("//")
-        print(data)
         if len(data) != 2: # a request should have: request_type//data
             return "insuf info" 
 
@@ -166,7 +165,6 @@ class Server:
         proxy_address = data[0]
         try:
             public_key = self.__active_proxies[proxy_address][1]
-            print(public_key)
             return public_key.save_pkcs1("PEM").decode()
         except AttributeError:
             del self.__active_proxies[proxy_address]
@@ -178,7 +176,6 @@ class Server:
         # new proxy data: locked(1/0)/proxy publickey  
         if len(data) == 3:
             try:
-                print(data)
                 self.__active_proxies.update({data[0]: (data[1], rsa.PublicKey.load_pkcs1(data[2]))})
                 self.__proxy_sockets = {socket: data[0]}
                 print(" INFO: New proxy connected from", (socket.getpeername()))

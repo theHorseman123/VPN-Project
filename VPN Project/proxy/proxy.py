@@ -176,8 +176,6 @@ class Proxy:
                     print(" *Closing connection with:",socket.getsockname())
                     socket.close()
                     return
-                data = b"pass"
-                send(socket, data)
             
             send(socket, b"send_key")
 
@@ -207,7 +205,6 @@ class Proxy:
         if data.split(b" ")[0] == b"CONNECT": # The proxy only accepts HTTPS requests
             self.__requests_exchange_loop(socket, data)
         else:
-            print(data)
             # The proxy only allows secured http requests
             response = "HTTP/1.1 405 Not Allowed\r\n"
             response += "Content-Type: text/html\r\n"
@@ -216,8 +213,6 @@ class Proxy:
             socket.send(response.encode("utf-8"))
                 
         socket.close()
-
-    
 
     def __requests_exchange_loop(self, client_socket, request):
         
@@ -269,7 +264,7 @@ class Proxy:
         
 def main():
     # Create proxy object
-    proxy = Proxy(host=sock.gethostbyname(sock.gethostname()), server_address=(sock.gethostbyname(sock.gethostname()), 1234))
+    proxy = Proxy(host=sock.gethostbyname(sock.gethostname()), server_address=(sock.gethostbyname(sock.gethostname()), 1234), secret_code="1234")
 
     # Start proxy
     proxy.mainloop()
