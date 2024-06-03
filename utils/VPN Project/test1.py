@@ -1,2 +1,0 @@
-dic = {}
-dic["helo"]
