@@ -103,7 +103,7 @@ class Client:
         if not status:
             return
         
-        status = self.__get_proxies()
+        status = self.get_proxies()
         if not status:
             return
         proxies = self.__active_proxies[0] # addr:port format
@@ -114,13 +114,15 @@ class Client:
 
         if not status[1]:
             console.write(status[0])
-            return 
+            return False
         console.write(f" INFO: Connected to proxy at: {proxy_addr}")
         proxy_address = (proxy_addr.split(":")[0], int(proxy_addr.split(":")[1]))
         proxy_public = status[0]
 
         self.__start_outer_client(proxy_address, proxy_public, event, console, secret_code, )
-   
+
+        return True
+
     def get_proxy_key(self, proxy_addr):
         # return: wanted proxy public key and True/False
         data = (f"get_proxy_key//{proxy_addr}").encode()
@@ -258,8 +260,8 @@ class Client:
             console.write(f" ERROR:{str(error)}")
 
         if not proxy_offline.is_set():
+            disable_proxy()
             proxy_offline.set()
-        disable_proxy()
 
     def __test_proxy_speed(self, proxy_socket, proxy_address,  proxy_key, session_id, proxy_public, event:threading.Event):
         try:
@@ -330,6 +332,7 @@ class Client:
                         socket.sendall(data)
             except sock.error as error:
                 if read_socket is proxy_socket:
+                    console.write(str(error))
                     proxy_offline.set()
                 proxy_socket.close()
                 return
@@ -344,7 +347,7 @@ def main():
     proxies = client.start_client()
     print(proxies)
     proxy = proxies[0]
-    client.app_proxy_connect(proxy)
+    key = client.get_proxy_key(proxy)
 
 if __name__ == '__main__':
     main()
