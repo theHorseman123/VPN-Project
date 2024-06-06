@@ -55,7 +55,6 @@ class Server:
         self.__public_key, self.__private_key = generate_keys(1024, "auth server")
 
         self.__active_proxies = {}
-        self.__proxy_sockets = {}
 
         self.__host = host
         self.__port = port
@@ -176,10 +175,13 @@ class Server:
         # new proxy data: locked(1/0)/proxy publickey  
         if len(data) == 3:
             try:
-                self.__active_proxies.update({data[0]: (data[1], rsa.PublicKey.load_pkcs1(data[2]))})
-                self.__proxy_sockets = {socket: data[0]}
-                print(" INFO: New proxy connected from", (socket.getpeername()))
-                return "pass"
+                if not data[0] in self.__active_proxies.keys():
+                    self.__active_proxies.update({data[0]: (data[1], rsa.PublicKey.load_pkcs1(data[2]))})
+                    self.__proxy_sockets = {socket: data[0]}
+                    print(" INFO: New proxy connected from", (socket.getpeername()))
+                    return "pass"
+                else:
+                    return "address already exists in the network"
             except AttributeError as error:
                 print(f"ERROR: {str(error)}")
                 return "invalid_key"
@@ -192,13 +194,13 @@ class Server:
 
         print(" *Starting server on:", (self.__host, self.__port))
         
-        # TODO: add error managment
         while 1:
-            client, addr = self.__server_socket.accept()
-            print(" INFO: new connection at:", addr)
-            # TODO: add thread limiter
-            start_new_thread(self.__client_handler, (client, addr))
-
+            try:
+                client, addr = self.__server_socket.accept()
+                print(" INFO: new connection at:", addr)
+                start_new_thread(self.__client_handler, (client, addr))
+            except Exception as error:
+                print(f" ERROR: {error}")
     
 def main():
     server = Server(host=sock.gethostbyname(sock.gethostname()))

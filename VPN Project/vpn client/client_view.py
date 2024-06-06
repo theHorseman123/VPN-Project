@@ -18,7 +18,7 @@ class MyTabView(ctk.CTkTabview):
         self.add("Connection")
         self.scorllable_frame = ctk.CTkScrollableFrame(master=self.tab("Connection"))
         self.scorllable_frame.pack(expand=True, fill="both")
-        
+
         self.canvas = None
 
         self.proxies = []
@@ -72,26 +72,26 @@ class MyTabView(ctk.CTkTabview):
 
         self.master.console.write(f" *Attempting connection with: {proxy_address}")
         self.master.connected = True
-        button.configure(text="Disconnect", command=lambda: self.disconnect(proxy_address, button, status), fg_color="dark red", hover_color="red")
         self.add_proxy_tab(proxy_address)
-        status = True
-        while not self.event.is_set() and status:
-            status = self.master.client.app_proxy_connect(proxy_address, self.master.console, self.event, secret_code=secret_code)
-        self.master.connected = False
+        button.configure(text="Disconnect", command=lambda: self.disconnect(proxy_address, button, status), fg_color="dark red", hover_color="red")
+        proxy_active = True
+        try:
+            while not self.event.is_set() and proxy_active:
+                proxy_active = self.master.client.app_proxy_connect(proxy_address, self.master.console, self.event, secret_code=secret_code)
+        except:
+            pass
         self.delete_proxy_tab(proxy_address)
         if self.event:
             self.disconnect(proxy_address, button, status)
-        self.event = None
-        
+
     def disconnect(self, proxy_address, button, status):
         if self.event:
             self.event.set()
-        try:
-            self.master.console.write(f" *Closing connection with proxy: {proxy_address}")
-            time.sleep(1) # waiting for the client to close connection
-            button.configure(text="Connect", command=lambda: start_new_thread(self.connect, (proxy_address, button, status)), fg_color="dark blue", hover_color="blue")
-        except:
-            pass
+        self.master.console.write(f" *Closing connection with proxy: {proxy_address}")
+        time.sleep(1) # waiting for the client to close connection
+        button.configure(text="Connect", command=lambda: start_new_thread(self.connect, (proxy_address, button, status)), fg_color="dark blue", hover_color="blue")
+        self.event = None
+        self.master.connected = False
 
     def create_proxy_frame(self, addr, status):
         frame = ctk.CTkFrame(self.scorllable_frame, bg_color="#2b2b2b")

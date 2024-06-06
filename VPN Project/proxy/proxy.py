@@ -264,7 +264,7 @@ class Proxy:
         
 def main():
     # Create proxy object
-    proxy = Proxy(host=sock.gethostbyname(sock.gethostname()), server_address=(sock.gethostbyname(sock.gethostname()), 1234), secret_code="1234")
+    proxy = Proxy(host="192.168.56.1", server_address=(sock.gethostbyname(sock.gethostname()), 1234), secret_code="1234")
 
     # Start proxy
     proxy.mainloop()

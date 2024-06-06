@@ -95,20 +95,7 @@ class Client:
 
         self.__server_key = aes_generate_key()
 
-        self.__public_key, self.__private_key = generate_keys(1024, "vpn client")
 
-    def start_client(self):
-
-        status = self.connect_server()
-        if not status:
-            return
-        
-        status = self.get_proxies()
-        if not status:
-            return
-        proxies = self.__active_proxies[0] # addr:port format
-        return proxies
-    
     def app_proxy_connect(self, proxy_addr, console, event:threading.Event, secret_code=None):
         status = self.get_proxy_key(proxy_addr)
 
@@ -241,7 +228,8 @@ class Client:
             console.write(f" INFO: can not connect to proxy: {status[0]}")
             return
         proxy_socket, proxy_key, session_id = status[0]
-        start_new_thread(self.__test_proxy_speed, (proxy_socket, proxy_address, proxy_key, session_id, proxy_public, client_event))
+        proxy_offline = threading.Event()
+        start_new_thread(self.__test_proxy_speed, (proxy_socket, proxy_address, proxy_key, session_id, proxy_public, client_event, proxy_offline))
         
         outer_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
         outer_socket.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
@@ -250,7 +238,6 @@ class Client:
 
         enable_proxy("localhost:5555")
 
-        proxy_offline = threading.Event()
         try:
             while not (proxy_offline.is_set() or client_event.is_set()):
                 socket, _  = outer_socket.accept()
@@ -263,9 +250,9 @@ class Client:
             disable_proxy()
             proxy_offline.set()
 
-    def __test_proxy_speed(self, proxy_socket, proxy_address,  proxy_key, session_id, proxy_public, event:threading.Event):
+    def __test_proxy_speed(self, proxy_socket, proxy_address,  proxy_key, session_id, proxy_public, event:threading.Event, proxy_offline:threading.Event):
         try:
-            while not event.is_set():
+            while not (event.is_set() or proxy_offline.is_set()):
                 encrypted_data = proxy_key.encrypt(b"CONNECT www.google.com:443\r\n\r\n")
                 size = len(encrypted_data)+8
                 send(proxy_socket, encrypted_data)
