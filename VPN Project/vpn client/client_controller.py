@@ -7,6 +7,7 @@ import threading
 from cryptography.fernet import Fernet
 import os
 import rsa
+import random
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -89,24 +90,58 @@ class Client:
         self.server_address = (server_address)
         self.__server_socket = None
 
-        self.proxy_speed = []
+        self.proxies_speed = {} # connected proxies speed: {proxy address: [proxy_speed1, proxy_speed2, .. proxy_speed30]}
+        
+        # [(proxy address, proxy_key, session id, secret code/None, proxy public key, proxy disconnected event, client disconnect event), (proxy2), (proxy3), ..]
+        self.proxies_connections = []
 
         self.__active_proxies = []
 
         self.__server_key = aes_generate_key()
 
+        self.console = None
 
-    def app_proxy_connect(self, proxy_addr, console, event:threading.Event, secret_code=None):
+    """
+    def add_connection(self, proxy_addr, event:threading.Event, secret_code=None):
+        status = self.get_proxy_key(proxy_addr)
+
+        if not status[1]:
+            self.console.write(status[0])
+            return False
+        self.console.write(f" INFO: Connected to proxy at: {proxy_addr}")
+        proxy_address = (proxy_addr.split(":")[0], int(proxy_addr.split(":")[1]))
+        proxy_public = status[0]
+    """
+
+    def app_proxy_connect(self, proxy_addr, console, event:threading.Event, disconnect, secret_code=None):
         status = self.get_proxy_key(proxy_addr)
 
         if not status[1]:
             console.write(status[0])
             return False
+
         console.write(f" INFO: Connected to proxy at: {proxy_addr}")
         proxy_address = (proxy_addr.split(":")[0], int(proxy_addr.split(":")[1]))
         proxy_public = status[0]
 
-        self.__start_outer_client(proxy_address, proxy_public, event, console, secret_code, )
+        status = self.__connect_to_proxy(proxy_address=proxy_address, proxy_public=proxy_public, secret_code=secret_code)
+        if not status[1]:
+            self.console.write(f" INFO: can not connect to proxy: {status[0]}")
+            return
+        proxy_socket, proxy_key, session_id = status[0]
+        proxy_offline = threading.Event()
+        # [(proxy address, proxy_key, session id, proxy socket, secret code/None, proxy disconnected event, client disconnect event)]
+        # append proxy info to proxies connection
+        self.proxies_connections.append((proxy_address, proxy_key, session_id, secret_code, proxy_public, proxy_offline, event))
+        
+        if not self.console: # if this is the first proxy connection
+            self.console = console
+            start_new_thread(self.__start_outer_client, (disconnect, ))
+        
+        self.proxies_speed.update({proxy_addr:[]})
+        start_new_thread(self.__test_proxy_speed, (proxy_socket, proxy_address,  proxy_key, session_id, proxy_public, event, proxy_offline))
+
+        proxy_offline.wait() # TODO: add session timeout
 
         return True
 
@@ -222,15 +257,7 @@ class Client:
         if data == b"pass":
             return "pass"
 
-    def __start_outer_client(self, proxy_address, proxy_public, client_event:threading.Event, console , secret_code=None):
-        status = self.__connect_to_proxy(proxy_address=proxy_address, proxy_public=proxy_public, secret_code=secret_code)
-        if not status[1]:
-            console.write(f" INFO: can not connect to proxy: {status[0]}")
-            return
-        proxy_socket, proxy_key, session_id = status[0]
-        proxy_offline = threading.Event()
-        start_new_thread(self.__test_proxy_speed, (proxy_socket, proxy_address, proxy_key, session_id, proxy_public, client_event, proxy_offline))
-        
+    def __start_outer_client(self, disconnect:threading.Event):
         outer_socket = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
         outer_socket.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
         outer_socket.bind(("localhost", 5555))
@@ -238,21 +265,31 @@ class Client:
 
         enable_proxy("localhost:5555")
 
-        try:
-            while not (proxy_offline.is_set() or client_event.is_set()):
-                socket, _  = outer_socket.accept()
-                start_new_thread(self.__request_handler, (socket, proxy_address, proxy_key, session_id, secret_code, proxy_public,console, proxy_offline))
-        except Exception as error:
-            pass
-            console.write(f" ERROR:{str(error)}")
+        while not disconnect.is_set(): # disconnect event happens when the client disconnects all proxies
+            if len(self.proxies_connections) == 0:
+                time.sleep(1)
+            for proxy_address, proxy_key, session_id, secret_code, proxy_public, proxy_offline, client_event in self.proxies_connections:
+                try:
+                    if client_event.is_set():
+                        proxy_offline.set()
+                    
+                    if proxy_offline.is_set():
+                        self.proxies_connections.remove((proxy_address, proxy_key, session_id, secret_code, proxy_public, proxy_offline, client_event))
 
-        if not proxy_offline.is_set():
-            disable_proxy()
-            proxy_offline.set()
+                    socket, _  = outer_socket.accept()
+                    start_new_thread(self.__request_handler, (socket, proxy_address, proxy_key, session_id, secret_code, proxy_public, proxy_offline))
+                
+                except Exception as error:
+                    self.console.write(f" ERROR:{str(error)}")
+                    proxy_offline.set()
+                    continue
+
+        disable_proxy()
 
     def __test_proxy_speed(self, proxy_socket, proxy_address,  proxy_key, session_id, proxy_public, event:threading.Event, proxy_offline:threading.Event):
         try:
-            while not (event.is_set() or proxy_offline.is_set()):
+            proxy_addr = f"{proxy_address[0]}:{str(proxy_address[1])}"
+            while not (proxy_offline.is_set() or event.is_set()):
                 encrypted_data = proxy_key.encrypt(b"CONNECT www.google.com:443\r\n\r\n")
                 size = len(encrypted_data)+8
                 send(proxy_socket, encrypted_data)
@@ -264,24 +301,25 @@ class Client:
                 finish_time = time.time_ns()
                 result = size/((finish_time-initial_time)*(10**-6))
                 proxy_socket.close()
-                if len(self.proxy_speed) == 30:
-                    self.proxy_speed = self.proxy_speed[1:]
-                self.proxy_speed.append(result)
+                if len(self.proxies_speed[proxy_addr]) == 30:
+                    self.proxies_speed[proxy_addr] = self.proxies_speed[proxy_addr][1:]
+                self.proxies_speed[proxy_addr].append(result)
+                proxy_socket.close()
                 time.sleep(1)
                 status = self.__connect_to_proxy(proxy_address=proxy_address, proxy_key=proxy_key, session_id=session_id, proxy_public=proxy_public)
                 if status[1]:
                     proxy_socket, _, _ = status[0]
                 else:
                     return
-        except:
-            if proxy_socket is sock:
-                proxy_socket.close()
+        except Exception as error:
             pass
+        if proxy_socket is sock:
+            proxy_socket.close()
 
-    def __request_handler(self, socket:sock, proxy_address, proxy_key, session_id, secret_code, proxy_public,console , proxy_offline):
+    def __request_handler(self, socket:sock, proxy_address, proxy_key, session_id, secret_code, proxy_public , proxy_offline):
         status = self.__connect_to_proxy(proxy_address=proxy_address, proxy_public=proxy_public, secret_code=secret_code, session_id=session_id, proxy_key=proxy_key)
         if not status[1]:
-            console.write(f" INFO: cant connect to proxy: {status[0]}")
+            self.console.write(f" INFO: cant connect to proxy: {status[0]}")
             return
         
         proxy_socket, proxy_key, _ = status[0]
@@ -319,7 +357,7 @@ class Client:
                         socket.sendall(data)
             except sock.error as error:
                 if read_socket is proxy_socket:
-                    console.write(str(error))
+                    self.console.write(str(error))
                     proxy_offline.set()
                 proxy_socket.close()
                 return
