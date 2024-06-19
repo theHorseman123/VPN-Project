@@ -4,24 +4,24 @@ import base64
 import hashlib
 import os
 
-def generate_keys(SIZE, PATH):
+def generate_keys(SIZE):
     # if one of the keys is missing, generate new ones
-        if os.path.isfile(f"./{PATH}/private.pem") and os.path.isfile(f"./{PATH}/public.pem"):
+        if os.path.isfile(f"./private.pem") and os.path.isfile(f"./public.pem"):
             # TODO: write a key check to see if the encryption key is valid
 
-            with open(f"{PATH}/public.pem", "rb") as f:
+            with open(f"public.pem", "rb") as f:
                 public_key = rsa.PublicKey.load_pkcs1(f.read())
 
-            with open(f"{PATH}/private.pem", "rb") as f:
+            with open(f"private.pem", "rb") as f:
                 private_key = rsa.PrivateKey.load_pkcs1(f.read())
         else:
 
             public_key, private_key = rsa.newkeys(SIZE)
 
-            with open(f"{PATH}/public.pem", "wb") as f:
+            with open(f"public.pem", "wb") as f:
                 f.write(public_key.save_pkcs1("PEM"))
 
-            with open(f"{PATH}/private.pem", "wb") as f:
+            with open(f"private.pem", "wb") as f:
                 f.write(private_key.save_pkcs1("PEM"))
         
         return public_key, private_key

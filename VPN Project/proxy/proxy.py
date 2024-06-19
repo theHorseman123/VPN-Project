@@ -4,7 +4,7 @@ import argparse
 import sys
 import os
 import rsa
-import scapy.all
+from scapy.all import get_if_addr
 from select import select
 from _thread import start_new_thread
 
@@ -51,7 +51,21 @@ def receive(socket:sock):
 
 class Proxy:
 
-    def __init__(self, host:str="localhost", port:int=8080, server_address=("localhost", 1234) , secret_code:str=None) -> None:
+    def __init__(self, host:str=None, port:int=None, server_address=None , secret_code:str=None, interface=None) -> None:
+        if interface:
+            try:
+                if not host:
+                    host = get_if_addr(interface)
+                if not server_address:
+                    server_address = (get_if_addr(interface), 1234)
+            except Exception as error:
+                pass
+        if not host:
+            host = "localhost"
+        if not server_address:
+            server_address=("localhost", 1234)
+        if not port:
+            port = 8080
         
         self.__host = host
         self.__port = port
@@ -60,7 +74,7 @@ class Proxy:
 
         self.__secret_code = secret_code # The code to connect to the proxy
 
-        self.__public_key, self.__private_key = generate_keys(1024, "proxy")
+        self.__public_key, self.__private_key = generate_keys(1024)
 
         self.server_address = server_address
         self.__server_key = aes_generate_key()
@@ -263,8 +277,21 @@ class Proxy:
             return
         
 def main():
+
+    parser = argparse.ArgumentParser(description='This is the code for the proxy server')
+    parser.add_argument("--server",  type=str, help="insert: server_host:server_port")
+    parser.add_argument("-i" , type=str, help="the interface the proxy will run from")
+    parser.add_argument("--host", type=str, help="proxy ip address")
+    parser.add_argument("--port", type=int, help="proxy port number")
+    parser.add_argument("--code", type=str, help="proxy secret lock code")
+    args = parser.parse_args()
     # Create proxy object
-    proxy = Proxy(host="192.168.56.1",port=8089, server_address=(sock.gethostbyname(sock.gethostname()), 1234), secret_code="tom1234")
+    try:
+        server_addr = args.server
+        server_addr = (server_addr.split(":")[0], int(server_addr.split(":")[1]))
+    except:
+        server_addr = None
+    proxy = Proxy(host=args.host,port=args.port, server_address=server_addr, secret_code=args.code, interface=args.i)
 
     # Start proxy
     proxy.mainloop()
